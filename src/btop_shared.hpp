@@ -130,6 +130,7 @@ namespace Gpu {
 		string name;            // process name from /proc/[pid]/comm
 		proc_type type;
 		unsigned int gpu_util;  // SM utilization %
+		double cpu_util;        // CPU utilization %
 	};
 
 	//* Container for supported Gpu::*::collect() functions

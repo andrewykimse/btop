@@ -1554,6 +1554,23 @@ namespace Gpu {
 							}
 						}
 
+						//? Read CPU usage per GPU process from /proc/[pid]/stat
+						static std::unordered_map<unsigned int, uint64_t> prev_cpu_ticks;
+						static uint64_t prev_total_ticks = 0;
+
+						// Read total CPU ticks from /proc/stat
+						uint64_t total_ticks = 0;
+						{
+							std::ifstream stat_file("/proc/stat");
+							string line;
+							if (stat_file.good() and std::getline(stat_file, line) and line.starts_with("cpu ")) {
+								std::istringstream iss(line.substr(4));
+								uint64_t val;
+								while (iss >> val) total_ticks += val;
+							}
+						}
+						uint64_t total_delta = total_ticks - prev_total_ticks;
+
 						for (auto& [pid, mem] : pid_mem) {
 							string name;
 							std::ifstream comm_file("/proc/" + to_string(pid) + "/comm");
@@ -1563,8 +1580,36 @@ namespace Gpu {
 							unsigned int sm = 0;
 							if (auto it = pid_sm_util.find(pid); it != pid_sm_util.end())
 								sm = it->second;
-							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid]), sm});
+
+							// Read utime + stime from /proc/[pid]/stat (fields 14 and 15, 1-indexed)
+							double cpu_pct = 0.0;
+							{
+								std::ifstream stat_file("/proc/" + to_string(pid) + "/stat");
+								if (stat_file.good()) {
+									string stat_line;
+									std::getline(stat_file, stat_line);
+									// Skip past comm field (enclosed in parens) to avoid spaces in process names
+									auto close_paren = stat_line.rfind(')');
+									if (close_paren != string::npos) {
+										std::istringstream iss(stat_line.substr(close_paren + 2));
+										string field;
+										uint64_t utime = 0, stime = 0;
+										for (int f = 3; f <= 14 and iss >> field; ++f) {
+											if (f == 14) utime = stoull(field);
+										}
+										if (iss >> field) stime = stoull(field);
+										uint64_t proc_ticks = utime + stime;
+										uint64_t prev = prev_cpu_ticks[pid];
+										if (prev > 0 and total_delta > 0)
+											cpu_pct = (double)(proc_ticks - prev) / (double)total_delta * 100.0 * Shared::coreCount;
+										prev_cpu_ticks[pid] = proc_ticks;
+									}
+								}
+							}
+
+							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid]), sm, cpu_pct});
 						}
+						prev_total_ticks = total_ticks;
 
 						rng::sort(gpus_slice[i].gpu_processes, [](const auto& a, const auto& b) {
 							return a.mem > b.mem;
