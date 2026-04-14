@@ -123,10 +123,12 @@ namespace Gpu {
 	const array mem_names { "used"s, "free"s };
 
 	//* Container for per-process GPU information
+	enum proc_type : uint8_t { Graphics = 1, Compute = 2, GraphicsCompute = 3 };
 	struct proc_info {
 		unsigned int pid;
 		unsigned long long mem; // GPU memory used in bytes
 		string name;            // process name from /proc/[pid]/comm
+		proc_type type;
 	};
 
 	//* Container for supported Gpu::*::collect() functions

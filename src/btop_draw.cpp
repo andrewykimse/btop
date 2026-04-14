@@ -1171,7 +1171,7 @@ namespace Gpu {
 			rows_used++;
 
 			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("title") + Fx::b
-				+ ljust("PID", 8) + ljust("Name", b_width - 22) + rjust("GPU-Mem", 12)
+				+ ljust("PID", 8) + ljust("Type", 5) + ljust("Name", b_width - 27) + rjust("GPU-Mem", 12)
 				+ Fx::ub;
 			rows_used++;
 
@@ -1182,13 +1182,16 @@ namespace Gpu {
 
 				string pid_str = to_string(proc.pid);
 				string mem_str = floating_humanizer(proc.mem);
-				string name_str = proc.name.substr(0, b_width - 22);
+				string name_str = proc.name.substr(0, b_width - 27);
+				string type_str = proc.type == Gpu::proc_type::GraphicsCompute ? "G+C"
+					: proc.type == Gpu::proc_type::Compute ? "C"
+					: "G";
 
 				long long mem_pct = gpu.mem_total > 0 ? (long long)(proc.mem * 100 / gpu.mem_total) : 0;
 				string color = Theme::g("used").at(clamp(mem_pct, 0ll, 100ll));
 
 				out += Mv::to(b_y + rows_used, b_x + 1) + color
-					+ ljust(pid_str, 8) + Theme::c("main_fg") + ljust(name_str, b_width - 22) + color + rjust(mem_str, 12);
+					+ ljust(pid_str, 8) + Theme::c("hi_fg") + ljust(type_str, 5) + Theme::c("main_fg") + ljust(name_str, b_width - 27) + color + rjust(mem_str, 12);
 				rows_used++;
 				proc_count++;
 			}

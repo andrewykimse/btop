@@ -1504,8 +1504,9 @@ namespace Gpu {
 					if (nvmlDeviceGetGraphicsRunningProcesses != nullptr or nvmlDeviceGetComputeRunningProcesses != nullptr) {
 						gpus_slice[i].gpu_processes.clear();
 						std::unordered_map<unsigned int, unsigned long long> pid_mem;
+						std::unordered_map<unsigned int, uint8_t> pid_type;
 
-						auto query_procs = [&](decltype(nvmlDeviceGetGraphicsRunningProcesses) fn) {
+						auto query_procs = [&](decltype(nvmlDeviceGetGraphicsRunningProcesses) fn, proc_type ptype) {
 							if (fn == nullptr) return;
 							unsigned int count = 0;
 							nvmlReturn_t ret = fn(devices[i], &count, nullptr);
@@ -1520,11 +1521,12 @@ namespace Gpu {
 									it->second += infos[j].usedGpuMemory;
 								else
 									pid_mem[infos[j].pid] = infos[j].usedGpuMemory;
+								pid_type[infos[j].pid] |= static_cast<uint8_t>(ptype);
 							}
 						};
 
-						query_procs(nvmlDeviceGetGraphicsRunningProcesses);
-						query_procs(nvmlDeviceGetComputeRunningProcesses);
+						query_procs(nvmlDeviceGetGraphicsRunningProcesses, proc_type::Graphics);
+						query_procs(nvmlDeviceGetComputeRunningProcesses, proc_type::Compute);
 
 						for (auto& [pid, mem] : pid_mem) {
 							string name;
@@ -1532,7 +1534,7 @@ namespace Gpu {
 							if (comm_file.good())
 								std::getline(comm_file, name);
 							if (name.empty()) name = to_string(pid);
-							gpus_slice[i].gpu_processes.push_back({pid, mem, name});
+							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid])});
 						}
 
 						rng::sort(gpus_slice[i].gpu_processes, [](const auto& a, const auto& b) {
