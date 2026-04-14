@@ -89,6 +89,7 @@ namespace Gpu {
 		{"gpu-pwr-total", {}},
 	};
 	long long gpu_pwr_total_max = 0;
+	vector<int> gpu_proc_scroll;
 }
 #endif
 

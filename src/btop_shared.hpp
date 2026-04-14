@@ -117,6 +117,7 @@ namespace Gpu {
 	extern vector<string> gpu_names;
 	extern vector<int> gpu_b_height_offsets;
 	extern long long gpu_pwr_total_max;
+	extern vector<int> gpu_proc_scroll; // scroll offset for GPU process list per panel
 
 	extern std::unordered_map<string, deque<long long>> shared_gpu_percent; // averages, power/vram total
 

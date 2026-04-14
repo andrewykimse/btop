@@ -1164,10 +1164,27 @@ namespace Gpu {
 
 		//? GPU Processes section
 		if (gpu.supported_functions.gpu_processes and Config::getB("show_gpu_processes") and not gpu.gpu_processes.empty()) {
+			int total_procs = (int)gpu.gpu_processes.size();
+			int max_proc_rows = max(1, height - rows_used - 4); // reserve for header, col header, PCIe, border
+			int& scroll = gpu_proc_scroll[index];
+			scroll = clamp(scroll, 0, max(0, total_procs - max_proc_rows));
+
+			// Section divider with scroll indicator
+			string scroll_info = total_procs > max_proc_rows
+				? fmt::format(" {}-{}/{} ", scroll + 1, min(scroll + max_proc_rows, total_procs), total_procs)
+				: "";
+			int hlines = b_width - 14 - (int)scroll_info.size();
+
 			out += Mv::to(b_y + rows_used, b_x)
 				+ Theme::c("div_line") + Symbols::div_left + Symbols::h_line
 				+ Symbols::title_left + Fx::b + Theme::c("title") + "processes" + Fx::ub + Theme::c("div_line")
-				+ Symbols::title_right + Symbols::h_line*(b_width - 14) + Symbols::div_right;
+				+ Symbols::title_right;
+			if (not scroll_info.empty())
+				out += Symbols::h_line*(max(0, hlines))
+					+ Symbols::title_left + Theme::c("inactive_fg") + scroll_info + Theme::c("div_line") + Symbols::title_right;
+			else
+				out += Symbols::h_line*(max(0, hlines));
+			out += Symbols::div_right;
 			rows_used++;
 
 			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("title") + Fx::b
@@ -1175,10 +1192,9 @@ namespace Gpu {
 				+ Fx::ub;
 			rows_used++;
 
-			int max_proc_rows = height - rows_used - 2;
 			int proc_count = 0;
-			for (const auto& proc : gpu.gpu_processes) {
-				if (proc_count >= max_proc_rows or proc_count >= 8) break;
+			for (int p = scroll; p < total_procs and proc_count < max_proc_rows; ++p) {
+				const auto& proc = gpu.gpu_processes[p];
 
 				string pid_str = to_string(proc.pid);
 				string mem_str = floating_humanizer(proc.mem);
@@ -2392,6 +2408,7 @@ namespace Draw {
 			gpu_meter_vec.resize(shown);
 			pwr_meter_vec.resize(shown);
 			enc_meter_vec.resize(shown);
+			gpu_proc_scroll.resize(shown, 0);
 			redraw.resize(shown);
 			total_height = 0;
 			for (auto i = 0; i < shown; ++i) {
