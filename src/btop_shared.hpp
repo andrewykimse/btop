@@ -129,6 +129,7 @@ namespace Gpu {
 		unsigned long long mem; // GPU memory used in bytes
 		string name;            // process name from /proc/[pid]/comm
 		proc_type type;
+		unsigned int gpu_util;  // SM utilization %
 	};
 
 	//* Container for supported Gpu::*::collect() functions

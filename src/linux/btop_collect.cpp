@@ -176,6 +176,14 @@ namespace Gpu {
 			unsigned int gpuInstanceId;     // unused, must match ABI
 			unsigned int computeInstanceId; // unused, must match ABI
 		};
+		struct nvmlProcessUtilizationSample_t {
+			unsigned int pid;
+			unsigned long long timeStamp;
+			unsigned int smUtil;
+			unsigned int memUtil;
+			unsigned int encUtil;
+			unsigned int decUtil;
+		};
 
 		//? Function pointers
 		const char* (*nvmlErrorString)(nvmlReturn_t);
@@ -197,6 +205,7 @@ namespace Gpu {
 		nvmlReturn_t (*nvmlDeviceGetDecoderUtilization)(nvmlDevice_t, unsigned int*, unsigned int*);
 		nvmlReturn_t (*nvmlDeviceGetGraphicsRunningProcesses)(nvmlDevice_t, unsigned int*, nvmlProcessInfo_t*);
 		nvmlReturn_t (*nvmlDeviceGetComputeRunningProcesses)(nvmlDevice_t, unsigned int*, nvmlProcessInfo_t*);
+		nvmlReturn_t (*nvmlDeviceGetProcessUtilization)(nvmlDevice_t, nvmlProcessUtilizationSample_t*, unsigned int*, unsigned long long);
 
 		//? Data
 		void* nvml_dl_handle;
@@ -1265,6 +1274,7 @@ namespace Gpu {
 			nvmlDeviceGetComputeRunningProcesses = (decltype(nvmlDeviceGetComputeRunningProcesses))load_nvml_sym("nvmlDeviceGetComputeRunningProcesses_v3");
 			if (nvmlDeviceGetComputeRunningProcesses == nullptr)
 				nvmlDeviceGetComputeRunningProcesses = (decltype(nvmlDeviceGetComputeRunningProcesses))load_nvml_sym("nvmlDeviceGetComputeRunningProcesses");
+			nvmlDeviceGetProcessUtilization = (decltype(nvmlDeviceGetProcessUtilization))load_nvml_sym("nvmlDeviceGetProcessUtilization");
 			dlerror(); // clear any residual error from optional symbol loading
 
 			//? Function calls
@@ -1528,13 +1538,32 @@ namespace Gpu {
 						query_procs(nvmlDeviceGetGraphicsRunningProcesses, proc_type::Graphics);
 						query_procs(nvmlDeviceGetComputeRunningProcesses, proc_type::Compute);
 
+						//? Query per-process GPU utilization
+						std::unordered_map<unsigned int, unsigned int> pid_sm_util;
+						if (nvmlDeviceGetProcessUtilization != nullptr) {
+							unsigned int sample_count = 0;
+							unsigned long long last_ts = 0;
+							nvmlReturn_t ret = nvmlDeviceGetProcessUtilization(devices[i], nullptr, &sample_count, last_ts);
+							if ((ret == NVML_SUCCESS or ret == 7) and sample_count > 0) {
+								vector<nvmlProcessUtilizationSample_t> samples(sample_count);
+								ret = nvmlDeviceGetProcessUtilization(devices[i], samples.data(), &sample_count, last_ts);
+								if (ret == NVML_SUCCESS) {
+									for (unsigned int j = 0; j < sample_count; ++j)
+										pid_sm_util[samples[j].pid] = samples[j].smUtil;
+								}
+							}
+						}
+
 						for (auto& [pid, mem] : pid_mem) {
 							string name;
 							std::ifstream comm_file("/proc/" + to_string(pid) + "/comm");
 							if (comm_file.good())
 								std::getline(comm_file, name);
 							if (name.empty()) name = to_string(pid);
-							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid])});
+							unsigned int sm = 0;
+							if (auto it = pid_sm_util.find(pid); it != pid_sm_util.end())
+								sm = it->second;
+							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid]), sm});
 						}
 
 						rng::sort(gpus_slice[i].gpu_processes, [](const auto& a, const auto& b) {
