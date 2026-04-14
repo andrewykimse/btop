@@ -122,11 +122,12 @@ namespace Gpu {
 
 	const array mem_names { "used"s, "free"s };
 
-	//* Container for process information // TODO
-	/*struct proc_info {
-    unsigned int pid;
-    unsigned long long mem;
-	};*/
+	//* Container for per-process GPU information
+	struct proc_info {
+		unsigned int pid;
+		unsigned long long mem; // GPU memory used in bytes
+		string name;            // process name from /proc/[pid]/comm
+	};
 
 	//* Container for supported Gpu::*::collect() functions
 	struct gpu_info_supported {
@@ -141,7 +142,8 @@ namespace Gpu {
 				 mem_used = true,
 				 pcie_txrx = true,
 				 encoder_utilization = true,
-				 decoder_utilization = true;
+				 decoder_utilization = true,
+			 gpu_processes = true;
 	};
 
 	//* Per-device container for GPU info
@@ -173,8 +175,7 @@ namespace Gpu {
 
 		gpu_info_supported supported_functions;
 
-		// vector<proc_info> graphics_processes = {}; // TODO
-		// vector<proc_info> compute_processes = {};
+		vector<proc_info> gpu_processes = {};
 	};
 
 	namespace Nvml {
