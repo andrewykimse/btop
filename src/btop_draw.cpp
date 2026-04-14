@@ -1162,9 +1162,37 @@ namespace Gpu {
 			}
 		}
 
-		//? Processes section header
-		//out += Mv::to(b_y+8, b_x) + Theme::c("div_line") + Symbols::div_left + Symbols::h_line + Symbols::title_left + Theme::c("main_fg") + Fx::b + "gpu-proc" + Fx::ub + Theme::c("div_line")
-		//	+ Symbols::title_right + Symbols::h_line*(b_width/2-12) + Symbols::div_down + Symbols::h_line*(b_width/2-2) + Symbols::div_right;
+		//? GPU Processes section
+		if (gpu.supported_functions.gpu_processes and Config::getB("show_gpu_processes") and not gpu.gpu_processes.empty()) {
+			out += Mv::to(b_y + rows_used, b_x)
+				+ Theme::c("div_line") + Symbols::div_left + Symbols::h_line
+				+ Symbols::title_left + Fx::b + Theme::c("title") + "processes" + Fx::ub + Theme::c("div_line")
+				+ Symbols::title_right + Symbols::h_line*(b_width - 14) + Symbols::div_right;
+			rows_used++;
+
+			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("title") + Fx::b
+				+ ljust("PID", 8) + ljust("Name", b_width - 22) + rjust("GPU-Mem", 12)
+				+ Fx::ub;
+			rows_used++;
+
+			int max_proc_rows = height - rows_used - 2;
+			int proc_count = 0;
+			for (const auto& proc : gpu.gpu_processes) {
+				if (proc_count >= max_proc_rows or proc_count >= 8) break;
+
+				string pid_str = to_string(proc.pid);
+				string mem_str = floating_humanizer(proc.mem);
+				string name_str = proc.name.substr(0, b_width - 22);
+
+				long long mem_pct = gpu.mem_total > 0 ? (long long)(proc.mem * 100 / gpu.mem_total) : 0;
+				string color = Theme::g("used").at(clamp(mem_pct, 0ll, 100ll));
+
+				out += Mv::to(b_y + rows_used, b_x + 1) + color
+					+ ljust(pid_str, 8) + Theme::c("main_fg") + ljust(name_str, b_width - 22) + color + rjust(mem_str, 12);
+				rows_used++;
+				proc_count++;
+			}
+		}
 
 		//? PCIe link throughput
 		// Negative RX/TX means that they are manually disabled, not that they are unsupported
