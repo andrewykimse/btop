@@ -1509,7 +1509,7 @@ namespace Gpu {
 							if (fn == nullptr) return;
 							unsigned int count = 0;
 							nvmlReturn_t ret = fn(devices[i], &count, nullptr);
-							if (ret != NVML_SUCCESS and ret != 2) return; // 2 = NVML_ERROR_INSUFFICIENT_SIZE
+							if (ret != NVML_SUCCESS and ret != 7) return; // 7 = NVML_ERROR_INSUFFICIENT_SIZE
 							if (count == 0) return;
 							vector<nvmlProcessInfo_t> infos(count);
 							ret = fn(devices[i], &count, infos.data());
