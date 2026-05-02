@@ -148,7 +148,7 @@ namespace Gpu {
 				 pcie_txrx = true,
 				 encoder_utilization = true,
 				 decoder_utilization = true,
-			 gpu_processes = true;
+				 gpu_processes = false;
 	};
 
 	//* Per-device container for GPU info

@@ -1165,7 +1165,9 @@ namespace Gpu {
 		//? GPU Processes section
 		if (gpu.supported_functions.gpu_processes and Config::getB("show_gpu_processes") and not gpu.gpu_processes.empty()) {
 			int total_procs = (int)gpu.gpu_processes.size();
-			int max_proc_rows = max(1, height - rows_used - 4); // reserve for header, col header, PCIe, border
+			bool pcie_shown = gpu.supported_functions.pcie_txrx and not (gpu.pcie_rx < 0 or gpu.pcie_tx < 0);
+			int reserved = 2 + (pcie_shown ? 1 : 0) + 1; // section header, col header, PCIe (if shown), bottom border
+			int max_proc_rows = max(1, height - rows_used - reserved);
 			int& scroll = gpu_proc_scroll[index];
 			scroll = clamp(scroll, 0, max(0, total_procs - max_proc_rows));
 

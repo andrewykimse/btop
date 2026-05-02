@@ -1298,10 +1298,11 @@ namespace Gpu {
 
 				initialized = true;
 
-				if (nvmlDeviceGetGraphicsRunningProcesses == nullptr and nvmlDeviceGetComputeRunningProcesses == nullptr) {
-					Logger::info("NVML: GPU process query functions not available");
+				if (nvmlDeviceGetGraphicsRunningProcesses != nullptr or nvmlDeviceGetComputeRunningProcesses != nullptr) {
 					for (unsigned int i = 0; i < device_count; ++i)
-						gpus[i].supported_functions.gpu_processes = false;
+						gpus[i].supported_functions.gpu_processes = true;
+				} else {
+					Logger::info("NVML: GPU process query functions not available");
 				}
 
 				//? Check supported functions & get maximums
@@ -1515,12 +1516,13 @@ namespace Gpu {
 						gpus_slice[i].gpu_processes.clear();
 						std::unordered_map<unsigned int, unsigned long long> pid_mem;
 						std::unordered_map<unsigned int, uint8_t> pid_type;
+						constexpr nvmlReturn_t NVML_ERROR_INSUFFICIENT_SIZE = 7;
 
 						auto query_procs = [&](decltype(nvmlDeviceGetGraphicsRunningProcesses) fn, proc_type ptype) {
 							if (fn == nullptr) return;
 							unsigned int count = 0;
 							nvmlReturn_t ret = fn(devices[i], &count, nullptr);
-							if (ret != NVML_SUCCESS and ret != 7) return; // 7 = NVML_ERROR_INSUFFICIENT_SIZE
+							if (ret != NVML_SUCCESS and ret != NVML_ERROR_INSUFFICIENT_SIZE) return;
 							if (count == 0) return;
 							vector<nvmlProcessInfo_t> infos(count);
 							ret = fn(devices[i], &count, infos.data());
@@ -1544,7 +1546,7 @@ namespace Gpu {
 							unsigned int sample_count = 0;
 							unsigned long long last_ts = 0;
 							nvmlReturn_t ret = nvmlDeviceGetProcessUtilization(devices[i], nullptr, &sample_count, last_ts);
-							if ((ret == NVML_SUCCESS or ret == 7) and sample_count > 0) {
+							if ((ret == NVML_SUCCESS or ret == NVML_ERROR_INSUFFICIENT_SIZE) and sample_count > 0) {
 								vector<nvmlProcessUtilizationSample_t> samples(sample_count);
 								ret = nvmlDeviceGetProcessUtilization(devices[i], samples.data(), &sample_count, last_ts);
 								if (ret == NVML_SUCCESS) {
@@ -1583,7 +1585,7 @@ namespace Gpu {
 
 							// Read utime + stime from /proc/[pid]/stat (fields 14 and 15, 1-indexed)
 							double cpu_pct = 0.0;
-							{
+							try {
 								std::ifstream stat_file("/proc/" + to_string(pid) + "/stat");
 								if (stat_file.good()) {
 									string stat_line;
@@ -1605,11 +1607,15 @@ namespace Gpu {
 										prev_cpu_ticks[pid] = proc_ticks;
 									}
 								}
-							}
+							} catch (const std::exception&) {}
 
 							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid]), sm, cpu_pct});
 						}
 						prev_total_ticks = total_ticks;
+
+						std::erase_if(prev_cpu_ticks, [&](const auto& entry) {
+							return pid_mem.find(entry.first) == pid_mem.end();
+						});
 
 						rng::sort(gpus_slice[i].gpu_processes, [](const auto& a, const auto& b) {
 							return a.mem > b.mem;
