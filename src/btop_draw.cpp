@@ -1162,9 +1162,63 @@ namespace Gpu {
 			}
 		}
 
-		//? Processes section header
-		//out += Mv::to(b_y+8, b_x) + Theme::c("div_line") + Symbols::div_left + Symbols::h_line + Symbols::title_left + Theme::c("main_fg") + Fx::b + "gpu-proc" + Fx::ub + Theme::c("div_line")
-		//	+ Symbols::title_right + Symbols::h_line*(b_width/2-12) + Symbols::div_down + Symbols::h_line*(b_width/2-2) + Symbols::div_right;
+		//? GPU Processes section
+		if (gpu.supported_functions.gpu_processes and Config::getB("show_gpu_processes") and not gpu.gpu_processes.empty()) {
+			int total_procs = (int)gpu.gpu_processes.size();
+			bool pcie_shown = gpu.supported_functions.pcie_txrx and not (gpu.pcie_rx < 0 or gpu.pcie_tx < 0);
+			int reserved = 2 + (pcie_shown ? 1 : 0) + 1; // section header, col header, PCIe (if shown), bottom border
+			int max_proc_rows = max(1, height - rows_used - reserved);
+			int& scroll = gpu_proc_scroll[index];
+			scroll = clamp(scroll, 0, max(0, total_procs - max_proc_rows));
+
+			// Section divider with scroll indicator
+			string scroll_info = total_procs > max_proc_rows
+				? fmt::format(" {}-{}/{} ", scroll + 1, min(scroll + max_proc_rows, total_procs), total_procs)
+				: "";
+			int hlines = b_width - 14 - (int)scroll_info.size();
+
+			out += Mv::to(b_y + rows_used, b_x)
+				+ Theme::c("div_line") + Symbols::div_left + Symbols::h_line
+				+ Symbols::title_left + Fx::b + Theme::c("title") + "processes" + Fx::ub + Theme::c("div_line")
+				+ Symbols::title_right;
+			if (not scroll_info.empty())
+				out += Symbols::h_line*(max(0, hlines))
+					+ Symbols::title_left + Theme::c("inactive_fg") + scroll_info + Theme::c("div_line") + Symbols::title_right;
+			else
+				out += Symbols::h_line*(max(0, hlines));
+			out += Symbols::div_right;
+			rows_used++;
+
+			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("title") + Fx::b
+				+ ljust("PID", 8) + ljust("Type", 5) + ljust("Name", b_width - 39) + rjust("CPU%", 6) + rjust("GPU%", 6) + rjust("GPU-Mem", 12)
+				+ Fx::ub;
+			rows_used++;
+
+			int proc_count = 0;
+			for (int p = scroll; p < total_procs and proc_count < max_proc_rows; ++p) {
+				const auto& proc = gpu.gpu_processes[p];
+
+				string pid_str = to_string(proc.pid);
+				string mem_str = floating_humanizer(proc.mem);
+				string name_str = proc.name.substr(0, b_width - 39);
+				string type_str = proc.type == Gpu::proc_type::GraphicsCompute ? "G+C"
+					: proc.type == Gpu::proc_type::Compute ? "C"
+					: "G";
+				string gpu_util_str = to_string(proc.gpu_util) + '%';
+				string cpu_util_str = fmt::format("{:.0f}%", proc.cpu_util);
+
+				long long mem_pct = gpu.mem_total > 0 ? (long long)(proc.mem * 100 / gpu.mem_total) : 0;
+				string color = Theme::g("used").at(clamp(mem_pct, 0ll, 100ll));
+				string gpu_util_color = Theme::g("cpu").at(clamp((long long)proc.gpu_util, 0ll, 100ll));
+				string cpu_util_color = Theme::g("cpu").at(clamp((long long)proc.cpu_util, 0ll, 100ll));
+
+				out += Mv::to(b_y + rows_used, b_x + 1) + color
+					+ ljust(pid_str, 8) + Theme::c("hi_fg") + ljust(type_str, 5) + Theme::c("main_fg") + ljust(name_str, b_width - 39)
+					+ cpu_util_color + rjust(cpu_util_str, 6) + gpu_util_color + rjust(gpu_util_str, 6) + color + rjust(mem_str, 12);
+				rows_used++;
+				proc_count++;
+			}
+		}
 
 		//? PCIe link throughput
 		// Negative RX/TX means that they are manually disabled, not that they are unsupported
@@ -2356,6 +2410,7 @@ namespace Draw {
 			gpu_meter_vec.resize(shown);
 			pwr_meter_vec.resize(shown);
 			enc_meter_vec.resize(shown);
+			gpu_proc_scroll.resize(shown, 0);
 			redraw.resize(shown);
 			total_height = 0;
 			for (auto i = 0; i < shown; ++i) {

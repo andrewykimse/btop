@@ -239,6 +239,7 @@ namespace Config {
 		{"rsmi_measure_pcie_speeds",
 								"#* Measure PCIe throughput on AMD cards, may impact performance on certain cards."},
 		{"gpu_mirror_graph",	"#* Horizontally mirror the GPU graph."},
+		{"show_gpu_processes",	"#* Show processes using the GPU in the GPU box."},
 		{"shown_gpus",			"#* Set which GPU vendors to show. Available values are \"nvidia amd intel apple\""},
 		{"custom_gpu_name0",	"#* Custom gpu0 model name, empty string to disable."},
 		{"custom_gpu_name1",	"#* Custom gpu1 model name, empty string to disable."},
@@ -353,6 +354,7 @@ namespace Config {
 		{"nvml_measure_pcie_speeds", true},
 		{"rsmi_measure_pcie_speeds", true},
 		{"gpu_mirror_graph", true},
+		{"show_gpu_processes", true},
 	#endif
 		{"terminal_sync", true},
 		{"save_config_on_exit", true},

@@ -170,6 +170,20 @@ namespace Gpu {
 
 		struct nvmlUtilization_t {unsigned int gpu, memory;};
 		struct nvmlMemory_t {unsigned long long total, free, used;};
+		struct nvmlProcessInfo_t {
+			unsigned int pid;
+			unsigned long long usedGpuMemory;
+			unsigned int gpuInstanceId;     // unused, must match ABI
+			unsigned int computeInstanceId; // unused, must match ABI
+		};
+		struct nvmlProcessUtilizationSample_t {
+			unsigned int pid;
+			unsigned long long timeStamp;
+			unsigned int smUtil;
+			unsigned int memUtil;
+			unsigned int encUtil;
+			unsigned int decUtil;
+		};
 
 		//? Function pointers
 		const char* (*nvmlErrorString)(nvmlReturn_t);
@@ -189,6 +203,9 @@ namespace Gpu {
 		nvmlReturn_t (*nvmlDeviceGetPcieThroughput)(nvmlDevice_t, nvmlPcieUtilCounter_t, unsigned int*);
 		nvmlReturn_t (*nvmlDeviceGetEncoderUtilization)(nvmlDevice_t, unsigned int*, unsigned int*);
 		nvmlReturn_t (*nvmlDeviceGetDecoderUtilization)(nvmlDevice_t, unsigned int*, unsigned int*);
+		nvmlReturn_t (*nvmlDeviceGetGraphicsRunningProcesses)(nvmlDevice_t, unsigned int*, nvmlProcessInfo_t*);
+		nvmlReturn_t (*nvmlDeviceGetComputeRunningProcesses)(nvmlDevice_t, unsigned int*, nvmlProcessInfo_t*);
+		nvmlReturn_t (*nvmlDeviceGetProcessUtilization)(nvmlDevice_t, nvmlProcessUtilizationSample_t*, unsigned int*, unsigned long long);
 
 		//? Data
 		void* nvml_dl_handle;
@@ -368,7 +385,8 @@ namespace Shared {
 					   + gpus[i].supported_functions.pwr_usage
 					   + (gpus[i].supported_functions.encoder_utilization or gpus[i].supported_functions.decoder_utilization)
 					   + (gpus[i].supported_functions.mem_total or gpus[i].supported_functions.mem_used)
-						* (1 + 2*(gpus[i].supported_functions.mem_total and gpus[i].supported_functions.mem_used) + 2*gpus[i].supported_functions.mem_utilization);
+						* (1 + 2*(gpus[i].supported_functions.mem_total and gpus[i].supported_functions.mem_used) + 2*gpus[i].supported_functions.mem_utilization)
+				   + (gpus[i].supported_functions.gpu_processes ? 4 : 0); // process list: 1 header + 3 process rows
 		}
 	#endif
 
@@ -1249,6 +1267,16 @@ namespace Gpu {
 
             #undef LOAD_SYM
 
+			//? Optional process query functions (may not exist on older NVML)
+			nvmlDeviceGetGraphicsRunningProcesses = (decltype(nvmlDeviceGetGraphicsRunningProcesses))load_nvml_sym("nvmlDeviceGetGraphicsRunningProcesses_v3");
+			if (nvmlDeviceGetGraphicsRunningProcesses == nullptr)
+				nvmlDeviceGetGraphicsRunningProcesses = (decltype(nvmlDeviceGetGraphicsRunningProcesses))load_nvml_sym("nvmlDeviceGetGraphicsRunningProcesses");
+			nvmlDeviceGetComputeRunningProcesses = (decltype(nvmlDeviceGetComputeRunningProcesses))load_nvml_sym("nvmlDeviceGetComputeRunningProcesses_v3");
+			if (nvmlDeviceGetComputeRunningProcesses == nullptr)
+				nvmlDeviceGetComputeRunningProcesses = (decltype(nvmlDeviceGetComputeRunningProcesses))load_nvml_sym("nvmlDeviceGetComputeRunningProcesses");
+			nvmlDeviceGetProcessUtilization = (decltype(nvmlDeviceGetProcessUtilization))load_nvml_sym("nvmlDeviceGetProcessUtilization");
+			dlerror(); // clear any residual error from optional symbol loading
+
 			//? Function calls
 			nvmlReturn_t result = nvmlInit();
     		if (result != NVML_SUCCESS) {
@@ -1269,6 +1297,13 @@ namespace Gpu {
 				gpu_names.resize(device_count);
 
 				initialized = true;
+
+				if (nvmlDeviceGetGraphicsRunningProcesses != nullptr or nvmlDeviceGetComputeRunningProcesses != nullptr) {
+					for (unsigned int i = 0; i < device_count; ++i)
+						gpus[i].supported_functions.gpu_processes = true;
+				} else {
+					Logger::info("NVML: GPU process query functions not available");
+				}
 
 				//? Check supported functions & get maximums
 				Nvml::collect<1>(gpus.data());
@@ -1475,16 +1510,118 @@ namespace Gpu {
 					} else gpus_slice[i].decoder_utilization = (long long)utilization;
 				}
 
-    			//? TODO: Processes using GPU
-    				/*unsigned int proc_info_len;
-    				nvmlProcessInfo_t* proc_info = 0;
-    				result = nvmlDeviceGetComputeRunningProcesses_v3(device, &proc_info_len, proc_info);
-    				if (result != NVML_SUCCESS) {
-						Logger::warning("NVML: Failed to get compute processes: {}", nvmlErrorString(result));
-    				} else {
-    					for (unsigned int i = 0; i < proc_info_len; ++i)
-    						gpus_slice[i].graphics_processes.push_back({proc_info[i].pid, proc_info[i].usedGpuMemory});
-    				}*/
+				//? Processes using GPU
+				if constexpr(not is_init) {
+					if (nvmlDeviceGetGraphicsRunningProcesses != nullptr or nvmlDeviceGetComputeRunningProcesses != nullptr) {
+						gpus_slice[i].gpu_processes.clear();
+						std::unordered_map<unsigned int, unsigned long long> pid_mem;
+						std::unordered_map<unsigned int, uint8_t> pid_type;
+						constexpr nvmlReturn_t NVML_ERROR_INSUFFICIENT_SIZE = 7;
+
+						auto query_procs = [&](decltype(nvmlDeviceGetGraphicsRunningProcesses) fn, proc_type ptype) {
+							if (fn == nullptr) return;
+							unsigned int count = 0;
+							nvmlReturn_t ret = fn(devices[i], &count, nullptr);
+							if (ret != NVML_SUCCESS and ret != NVML_ERROR_INSUFFICIENT_SIZE) return;
+							if (count == 0) return;
+							vector<nvmlProcessInfo_t> infos(count);
+							ret = fn(devices[i], &count, infos.data());
+							if (ret != NVML_SUCCESS) return;
+							for (unsigned int j = 0; j < count; ++j) {
+								auto it = pid_mem.find(infos[j].pid);
+								if (it != pid_mem.end())
+									it->second += infos[j].usedGpuMemory;
+								else
+									pid_mem[infos[j].pid] = infos[j].usedGpuMemory;
+								pid_type[infos[j].pid] |= static_cast<uint8_t>(ptype);
+							}
+						};
+
+						query_procs(nvmlDeviceGetGraphicsRunningProcesses, proc_type::Graphics);
+						query_procs(nvmlDeviceGetComputeRunningProcesses, proc_type::Compute);
+
+						//? Query per-process GPU utilization
+						std::unordered_map<unsigned int, unsigned int> pid_sm_util;
+						if (nvmlDeviceGetProcessUtilization != nullptr) {
+							unsigned int sample_count = 0;
+							unsigned long long last_ts = 0;
+							nvmlReturn_t ret = nvmlDeviceGetProcessUtilization(devices[i], nullptr, &sample_count, last_ts);
+							if ((ret == NVML_SUCCESS or ret == NVML_ERROR_INSUFFICIENT_SIZE) and sample_count > 0) {
+								vector<nvmlProcessUtilizationSample_t> samples(sample_count);
+								ret = nvmlDeviceGetProcessUtilization(devices[i], samples.data(), &sample_count, last_ts);
+								if (ret == NVML_SUCCESS) {
+									for (unsigned int j = 0; j < sample_count; ++j)
+										pid_sm_util[samples[j].pid] = samples[j].smUtil;
+								}
+							}
+						}
+
+						//? Read CPU usage per GPU process from /proc/[pid]/stat
+						static std::unordered_map<unsigned int, uint64_t> prev_cpu_ticks;
+						static uint64_t prev_total_ticks = 0;
+
+						// Read total CPU ticks from /proc/stat
+						uint64_t total_ticks = 0;
+						{
+							std::ifstream stat_file("/proc/stat");
+							string line;
+							if (stat_file.good() and std::getline(stat_file, line) and line.starts_with("cpu ")) {
+								std::istringstream iss(line.substr(4));
+								uint64_t val;
+								while (iss >> val) total_ticks += val;
+							}
+						}
+						uint64_t total_delta = total_ticks - prev_total_ticks;
+
+						for (auto& [pid, mem] : pid_mem) {
+							string name;
+							std::ifstream comm_file("/proc/" + to_string(pid) + "/comm");
+							if (comm_file.good())
+								std::getline(comm_file, name);
+							if (name.empty()) name = to_string(pid);
+							unsigned int sm = 0;
+							if (auto it = pid_sm_util.find(pid); it != pid_sm_util.end())
+								sm = it->second;
+
+							// Read utime + stime from /proc/[pid]/stat (fields 14 and 15, 1-indexed)
+							double cpu_pct = 0.0;
+							try {
+								std::ifstream stat_file("/proc/" + to_string(pid) + "/stat");
+								if (stat_file.good()) {
+									string stat_line;
+									std::getline(stat_file, stat_line);
+									// Skip past comm field (enclosed in parens) to avoid spaces in process names
+									auto close_paren = stat_line.rfind(')');
+									if (close_paren != string::npos) {
+										std::istringstream iss(stat_line.substr(close_paren + 2));
+										string field;
+										uint64_t utime = 0, stime = 0;
+										for (int f = 3; f <= 14 and iss >> field; ++f) {
+											if (f == 14) utime = stoull(field);
+										}
+										if (iss >> field) stime = stoull(field);
+										uint64_t proc_ticks = utime + stime;
+										uint64_t prev = prev_cpu_ticks[pid];
+										if (prev > 0 and total_delta > 0)
+											cpu_pct = (double)(proc_ticks - prev) / (double)total_delta * 100.0 * Shared::coreCount;
+										prev_cpu_ticks[pid] = proc_ticks;
+									}
+								}
+							} catch (const std::exception&) {}
+
+							gpus_slice[i].gpu_processes.push_back({pid, mem, name, static_cast<proc_type>(pid_type[pid]), sm, cpu_pct});
+						}
+						prev_total_ticks = total_ticks;
+
+						std::erase_if(prev_cpu_ticks, [&](const auto& entry) {
+							return pid_mem.find(entry.first) == pid_mem.end();
+						});
+
+						rng::sort(gpus_slice[i].gpu_processes, [](const auto& a, const auto& b) {
+							return a.mem > b.mem;
+						});
+					}
+				}
 
 				// nvTimer.stop_rename_reset("Nv pcie thread join");
 				//? Join PCIE TX/RX threads

@@ -528,6 +528,26 @@ namespace Input {
 				}
 			}
 
+		#ifdef GPU_SUPPORT
+			//? Input actions for gpu box (mouse scroll on process list)
+			if (Gpu::shown != 0 and key.starts_with("mouse_scroll_")) {
+				const auto& [col, line] = mouse_pos;
+				for (int gi = 0; gi < Gpu::shown; ++gi) {
+					int gx = Gpu::x_vec[gi], gy = Gpu::y_vec[gi];
+					int gheight = Gpu::gpu_b_height_offsets[Gpu::shown_panels[gi]] + 4;
+					if (col >= gx and col < gx + Gpu::width and line >= gy and line < gy + gheight) {
+						if (key == "mouse_scroll_up")
+							Gpu::gpu_proc_scroll[gi] = std::max(0, Gpu::gpu_proc_scroll[gi] - 1);
+						else if (key == "mouse_scroll_down")
+							Gpu::gpu_proc_scroll[gi]++;
+						Gpu::redraw[gi] = true;
+						Runner::run("gpu", true, true);
+						return;
+					}
+				}
+			}
+		#endif
+
 			//? Input actions for cpu box
 			if (Cpu::shown) {
 				bool keep_going = false;

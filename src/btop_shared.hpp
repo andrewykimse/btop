@@ -117,16 +117,22 @@ namespace Gpu {
 	extern vector<string> gpu_names;
 	extern vector<int> gpu_b_height_offsets;
 	extern long long gpu_pwr_total_max;
+	extern vector<int> gpu_proc_scroll; // scroll offset for GPU process list per panel
 
 	extern std::unordered_map<string, deque<long long>> shared_gpu_percent; // averages, power/vram total
 
 	const array mem_names { "used"s, "free"s };
 
-	//* Container for process information // TODO
-	/*struct proc_info {
-    unsigned int pid;
-    unsigned long long mem;
-	};*/
+	//* Container for per-process GPU information
+	enum proc_type : uint8_t { Graphics = 1, Compute = 2, GraphicsCompute = 3 };
+	struct proc_info {
+		unsigned int pid;
+		unsigned long long mem; // GPU memory used in bytes
+		string name;            // process name from /proc/[pid]/comm
+		proc_type type;
+		unsigned int gpu_util;  // SM utilization %
+		double cpu_util;        // CPU utilization %
+	};
 
 	//* Container for supported Gpu::*::collect() functions
 	struct gpu_info_supported {
@@ -141,7 +147,8 @@ namespace Gpu {
 				 mem_used = true,
 				 pcie_txrx = true,
 				 encoder_utilization = true,
-				 decoder_utilization = true;
+				 decoder_utilization = true,
+				 gpu_processes = false;
 	};
 
 	//* Per-device container for GPU info
@@ -173,8 +180,7 @@ namespace Gpu {
 
 		gpu_info_supported supported_functions;
 
-		// vector<proc_info> graphics_processes = {}; // TODO
-		// vector<proc_info> compute_processes = {};
+		vector<proc_info> gpu_processes = {};
 	};
 
 	namespace Nvml {
